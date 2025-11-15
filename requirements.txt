@@ -1,0 +1,9 @@
+# Core Django
+Django==4.2.7
+djangorestframework==3.14.0
+
+# Database
+psycopg2-binary==2.9.9
+
+# Configuration
+python-decouple==3.8
