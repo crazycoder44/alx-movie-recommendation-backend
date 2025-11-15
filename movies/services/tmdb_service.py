@@ -3,34 +3,66 @@ TMDb API Service Module
 
 This module provides services for interacting with The Movie Database (TMDb) API.
 It handles fetching trending movies, recommendations, movie details, and search functionality.
+Includes caching support for improved performance.
 """
 
 import requests
 from django.conf import settings
-from typing import Dict, List, Optional
+from django.core.cache import cache
+from typing import Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class TMDbService:
-    """Service class for interacting with TMDb API"""
+    """Service class for interacting with TMDb API with caching support"""
     
     def __init__(self):
         self.api_key = settings.TMDB_API_KEY
         self.base_url = settings.TMDB_BASE_URL
         self.image_base_url = "https://image.tmdb.org/t/p/"
+        self.cache_ttl = settings.CACHE_TTL
         
         if not self.api_key:
             logger.warning("TMDb API key is not configured")
     
-    def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict]:
+    def _generate_cache_key(self, endpoint: str, params: Optional[Dict] = None) -> str:
+        """Generate a unique cache key for the request"""
+        param_str = "_".join([f"{k}={v}" for k, v in sorted((params or {}).items()) if k != 'api_key'])
+        return f"tmdb:{endpoint.replace('/', '_')}:{param_str}"
+    
+    def _get_cached_data(self, cache_key: str) -> Optional[Dict]:
+        """Get data from cache"""
+        try:
+            data = cache.get(cache_key)
+            if data:
+                logger.info(f"Cache HIT: {cache_key}")
+            else:
+                logger.info(f"Cache MISS: {cache_key}")
+            return data
+        except Exception as e:
+            logger.error(f"Cache get error: {str(e)}")
+            return None
+    
+    def _set_cached_data(self, cache_key: str, data: Dict, timeout: int):
+        """Set data in cache"""
+        try:
+            cache.set(cache_key, data, timeout)
+            logger.info(f"Cache SET: {cache_key} (TTL: {timeout}s)")
+        except Exception as e:
+            logger.error(f"Cache set error: {str(e)}")
+    
+    def _make_request(self, endpoint: str, params: Optional[Dict] = None,
+                     cache_timeout: Optional[int] = None, use_cache: bool = True) -> Optional[Dict]:
         """
-        Make a request to TMDb API with error handling
+        Make a request to TMDb API with error handling and caching
         
         Args:
             endpoint: API endpoint (e.g., '/movie/popular')
             params: Query parameters
+            cache_timeout: Cache timeout in seconds (None for no caching)
+            use_cache: Whether to use cache
             
         Returns:
             Response data as dictionary or None if error
@@ -44,12 +76,27 @@ class TMDbService:
             params = {}
         params['api_key'] = self.api_key
         
+        # Check cache if enabled
+        if use_cache and cache_timeout:
+            cache_key = self._generate_cache_key(endpoint, params)
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data is not None:
+                return cached_data
+        
+        # Make API request
         url = f"{self.base_url}{endpoint}"
         
         try:
             response = requests.get(url, params=params, timeout=10)
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            
+            # Cache the result if enabled
+            if use_cache and cache_timeout and data:
+                cache_key = self._generate_cache_key(endpoint, params)
+                self._set_cached_data(cache_key, data, cache_timeout)
+            
+            return data
         except requests.exceptions.Timeout:
             logger.error(f"Timeout error for endpoint: {endpoint}")
             return None
@@ -65,7 +112,7 @@ class TMDbService:
     
     def get_trending_movies(self, time_window: str = 'day', page: int = 1) -> Optional[Dict]:
         """
-        Get trending movies
+        Get trending movies (with caching)
         
         Args:
             time_window: 'day' or 'week'
@@ -76,11 +123,11 @@ class TMDbService:
         """
         endpoint = f"/trending/movie/{time_window}"
         params = {'page': page}
-        return self._make_request(endpoint, params)
+        return self._make_request(endpoint, params, cache_timeout=self.cache_ttl['trending'])
     
     def get_popular_movies(self, page: int = 1) -> Optional[Dict]:
         """
-        Get popular movies
+        Get popular movies (with caching)
         
         Args:
             page: Page number for pagination
@@ -90,11 +137,11 @@ class TMDbService:
         """
         endpoint = "/movie/popular"
         params = {'page': page}
-        return self._make_request(endpoint, params)
+        return self._make_request(endpoint, params, cache_timeout=self.cache_ttl['popular'])
     
     def get_top_rated_movies(self, page: int = 1) -> Optional[Dict]:
         """
-        Get top rated movies
+        Get top rated movies (with caching)
         
         Args:
             page: Page number for pagination
@@ -104,11 +151,11 @@ class TMDbService:
         """
         endpoint = "/movie/top_rated"
         params = {'page': page}
-        return self._make_request(endpoint, params)
+        return self._make_request(endpoint, params, cache_timeout=self.cache_ttl['top_rated'])
     
     def get_movie_details(self, movie_id: int) -> Optional[Dict]:
         """
-        Get detailed information about a specific movie
+        Get detailed information about a specific movie (with caching)
         
         Args:
             movie_id: TMDb movie ID
@@ -117,14 +164,12 @@ class TMDbService:
             Dictionary containing movie details
         """
         endpoint = f"/movie/{movie_id}"
-        params = {
-            'append_to_response': 'videos,credits,similar,recommendations'
-        }
-        return self._make_request(endpoint, params)
+        params = {'append_to_response': 'credits,videos,images,keywords'}
+        return self._make_request(endpoint, params, cache_timeout=self.cache_ttl['movie_details'])
     
     def get_movie_recommendations(self, movie_id: int, page: int = 1) -> Optional[Dict]:
         """
-        Get movie recommendations based on a specific movie
+        Get movie recommendations based on a specific movie (with caching)
         
         Args:
             movie_id: TMDb movie ID
@@ -135,11 +180,11 @@ class TMDbService:
         """
         endpoint = f"/movie/{movie_id}/recommendations"
         params = {'page': page}
-        return self._make_request(endpoint, params)
+        return self._make_request(endpoint, params, cache_timeout=self.cache_ttl['recommendations'])
     
     def get_similar_movies(self, movie_id: int, page: int = 1) -> Optional[Dict]:
         """
-        Get similar movies based on a specific movie
+        Get similar movies based on a specific movie (with caching)
         
         Args:
             movie_id: TMDb movie ID
@@ -150,11 +195,11 @@ class TMDbService:
         """
         endpoint = f"/movie/{movie_id}/similar"
         params = {'page': page}
-        return self._make_request(endpoint, params)
+        return self._make_request(endpoint, params, cache_timeout=self.cache_ttl['similar'])
     
     def search_movies(self, query: str, page: int = 1) -> Optional[Dict]:
         """
-        Search for movies by title
+        Search for movies by query (with caching)
         
         Args:
             query: Search query string
@@ -164,79 +209,48 @@ class TMDbService:
             Dictionary containing search results
         """
         endpoint = "/search/movie"
-        params = {
-            'query': query,
-            'page': page
-        }
-        return self._make_request(endpoint, params)
-    
-    def discover_movies(self, **kwargs) -> Optional[Dict]:
-        """
-        Discover movies with various filters
-        
-        Args:
-            **kwargs: Filter parameters (genre, year, sort_by, etc.)
-            
-        Returns:
-            Dictionary containing discovered movies
-        """
-        endpoint = "/discover/movie"
-        params = kwargs
-        params['page'] = kwargs.get('page', 1)
-        return self._make_request(endpoint, params)
+        params = {'query': query, 'page': page}
+        return self._make_request(endpoint, params, cache_timeout=self.cache_ttl['search'])
     
     def get_movie_genres(self) -> Optional[Dict]:
         """
-        Get list of official movie genres
+        Get list of official movie genres (with long-term caching)
         
         Returns:
             Dictionary containing genre list
         """
         endpoint = "/genre/movie/list"
-        return self._make_request(endpoint)
+        return self._make_request(endpoint, cache_timeout=self.cache_ttl['genres'])
     
-    def get_now_playing(self, page: int = 1) -> Optional[Dict]:
+    def get_poster_url(self, poster_path: str, size: str = 'w500') -> Optional[str]:
         """
-        Get movies currently in theaters
+        Get full URL for movie poster
         
         Args:
-            page: Page number for pagination
+            poster_path: Poster path from TMDb
+            size: Image size ('w92', 'w154', 'w185', 'w342', 'w500', 'w780', 'original')
             
         Returns:
-            Dictionary containing now playing movies
+            Full URL string or None
         """
-        endpoint = "/movie/now_playing"
-        params = {'page': page}
-        return self._make_request(endpoint, params)
-    
-    def get_upcoming_movies(self, page: int = 1) -> Optional[Dict]:
-        """
-        Get upcoming movies
-        
-        Args:
-            page: Page number for pagination
-            
-        Returns:
-            Dictionary containing upcoming movies
-        """
-        endpoint = "/movie/upcoming"
-        params = {'page': page}
-        return self._make_request(endpoint, params)
-    
-    def get_image_url(self, image_path: Optional[str], size: str = 'original') -> Optional[str]:
-        """
-        Get full URL for an image
-        
-        Args:
-            image_path: Image path from TMDb
-            size: Image size (w500, w780, original, etc.)
-            
-        Returns:
-            Full image URL or None
-        """
-        if not image_path:
+        if not poster_path:
             return None
-        return f"{self.image_base_url}{size}{image_path}"
+        return f"{self.image_base_url}{size}{poster_path}"
+    
+    def get_backdrop_url(self, backdrop_path: str, size: str = 'original') -> Optional[str]:
+        """
+        Get full URL for movie backdrop
+        
+        Args:
+            backdrop_path: Backdrop path from TMDb
+            size: Image size ('w300', 'w780', 'w1280', 'original')
+            
+        Returns:
+            Full URL string or None
+        """
+        if not backdrop_path:
+            return None
+        return f"{self.image_base_url}{size}{backdrop_path}"
 
 
 # Create a singleton instance

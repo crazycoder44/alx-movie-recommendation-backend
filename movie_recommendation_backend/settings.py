@@ -186,3 +186,31 @@ SIMPLE_JWT = {
 # TMDb API Configuration
 TMDB_API_KEY = config('TMDB_API_KEY', default='')
 TMDB_BASE_URL = config('TMDB_BASE_URL', default='https://api.themoviedb.org/3')
+
+# Redis Configuration
+REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+
+# Cache Configuration
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        },
+        'KEY_PREFIX': 'movie_app',
+        'TIMEOUT': 60 * 60 * 6,  # 6 hours default timeout
+    }
+}
+
+# Cache time settings (in seconds)
+CACHE_TTL = {
+    'trending': 60 * 60 * 12,  # 12 hours
+    'popular': 60 * 60 * 24,  # 24 hours
+    'top_rated': 60 * 60 * 24,  # 24 hours
+    'movie_details': 60 * 60 * 24 * 7,  # 7 days
+    'genres': 60 * 60 * 24 * 30,  # 30 days
+    'recommendations': 60 * 60 * 6,  # 6 hours
+    'similar': 60 * 60 * 6,  # 6 hours
+    'search': 60 * 60,  # 1 hour
+}
