@@ -6,6 +6,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework.validators import UniqueValidator
+from .models import FavoriteMovie, Watchlist
 
 User = get_user_model()
 
@@ -113,3 +114,47 @@ class ChangePasswordSerializer(serializers.Serializer):
                 "new_password": "New password fields didn't match."
             })
         return attrs
+
+
+class FavoriteMovieSerializer(serializers.ModelSerializer):
+    """Serializer for favorite movies"""
+    poster_url = serializers.ReadOnlyField()
+    user = UserProfileSerializer(read_only=True)
+    
+    class Meta:
+        model = FavoriteMovie
+        fields = [
+            'id', 'user', 'tmdb_id', 'title', 'poster_path',
+            'poster_url', 'release_date', 'vote_average', 'created_at'
+        ]
+        read_only_fields = ['id', 'user', 'created_at']
+
+
+class AddFavoriteMovieSerializer(serializers.ModelSerializer):
+    """Serializer for adding a movie to favorites"""
+    
+    class Meta:
+        model = FavoriteMovie
+        fields = ['tmdb_id', 'title', 'poster_path', 'release_date', 'vote_average']
+
+
+class WatchlistSerializer(serializers.ModelSerializer):
+    """Serializer for watchlist"""
+    poster_url = serializers.ReadOnlyField()
+    user = UserProfileSerializer(read_only=True)
+    
+    class Meta:
+        model = Watchlist
+        fields = [
+            'id', 'user', 'tmdb_id', 'title', 'poster_path',
+            'poster_url', 'release_date', 'created_at'
+        ]
+        read_only_fields = ['id', 'user', 'created_at']
+
+
+class AddWatchlistSerializer(serializers.ModelSerializer):
+    """Serializer for adding a movie to watchlist"""
+    
+    class Meta:
+        model = Watchlist
+        fields = ['tmdb_id', 'title', 'poster_path', 'release_date']

@@ -8,14 +8,20 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate, get_user_model
+from django.shortcuts import get_object_or_404
 
 from .serializers import (
     UserRegistrationSerializer,
     UserLoginSerializer,
     UserProfileSerializer,
     UserUpdateSerializer,
-    ChangePasswordSerializer
+    ChangePasswordSerializer,
+    FavoriteMovieSerializer,
+    AddFavoriteMovieSerializer,
+    WatchlistSerializer,
+    AddWatchlistSerializer
 )
+from .models import FavoriteMovie, Watchlist
 
 User = get_user_model()
 
@@ -184,4 +190,134 @@ class UserViewSet(viewsets.GenericViewSet):
         """
         return Response({
             'message': 'Logout successful. Please discard your tokens.'
+        })
+
+
+class FavoriteMovieViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing user's favorite movies
+    """
+    serializer_class = FavoriteMovieSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return favorites for the current user"""
+        return FavoriteMovie.objects.filter(user=self.request.user)
+    
+    def get_serializer_class(self):
+        """Return appropriate serializer class"""
+        if self.action == 'create':
+            return AddFavoriteMovieSerializer
+        return FavoriteMovieSerializer
+    
+    def create(self, request, *args, **kwargs):
+        """Add a movie to user's favorites"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Check if movie already in favorites
+        tmdb_id = serializer.validated_data['tmdb_id']
+        existing = FavoriteMovie.objects.filter(
+            user=request.user,
+            tmdb_id=tmdb_id
+        ).first()
+        
+        if existing:
+            return Response({
+                'message': 'Movie already in favorites',
+                'favorite': FavoriteMovieSerializer(existing).data
+            }, status=status.HTTP_200_OK)
+        
+        # Create favorite
+        favorite = serializer.save(user=request.user)
+        
+        return Response({
+            'message': 'Movie added to favorites',
+            'favorite': FavoriteMovieSerializer(favorite).data
+        }, status=status.HTTP_201_CREATED)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Remove a movie from user's favorites"""
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response({
+            'message': 'Movie removed from favorites'
+        }, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['get'], url_path='check/(?P<tmdb_id>[0-9]+)')
+    def check_favorite(self, request, tmdb_id=None):
+        """Check if a movie is in user's favorites"""
+        is_favorite = FavoriteMovie.objects.filter(
+            user=request.user,
+            tmdb_id=tmdb_id
+        ).exists()
+        
+        return Response({
+            'is_favorite': is_favorite,
+            'tmdb_id': tmdb_id
+        })
+
+
+class WatchlistViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing user's watchlist
+    """
+    serializer_class = WatchlistSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return watchlist for the current user"""
+        return Watchlist.objects.filter(user=self.request.user)
+    
+    def get_serializer_class(self):
+        """Return appropriate serializer class"""
+        if self.action == 'create':
+            return AddWatchlistSerializer
+        return WatchlistSerializer
+    
+    def create(self, request, *args, **kwargs):
+        """Add a movie to user's watchlist"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Check if movie already in watchlist
+        tmdb_id = serializer.validated_data['tmdb_id']
+        existing = Watchlist.objects.filter(
+            user=request.user,
+            tmdb_id=tmdb_id
+        ).first()
+        
+        if existing:
+            return Response({
+                'message': 'Movie already in watchlist',
+                'watchlist': WatchlistSerializer(existing).data
+            }, status=status.HTTP_200_OK)
+        
+        # Create watchlist item
+        watchlist = serializer.save(user=request.user)
+        
+        return Response({
+            'message': 'Movie added to watchlist',
+            'watchlist': WatchlistSerializer(watchlist).data
+        }, status=status.HTTP_201_CREATED)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Remove a movie from user's watchlist"""
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response({
+            'message': 'Movie removed from watchlist'
+        }, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['get'], url_path='check/(?P<tmdb_id>[0-9]+)')
+    def check_watchlist(self, request, tmdb_id=None):
+        """Check if a movie is in user's watchlist"""
+        is_in_watchlist = Watchlist.objects.filter(
+            user=request.user,
+            tmdb_id=tmdb_id
+        ).exists()
+        
+        return Response({
+            'is_in_watchlist': is_in_watchlist,
+            'tmdb_id': tmdb_id
         })
